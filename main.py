@@ -10,8 +10,7 @@ from email.mime.multipart import MIMEMultipart
 import assemblyai as aai
 import litellm
 import markdown
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.formatters import TextFormatter
+import requests
 
 
 def load_config(config_path):
@@ -119,13 +118,12 @@ def get_youtube_video_id(url):
 
 
 def get_youtube_transcript(item, config):
-    """Fetch the transcript for a YouTube video via youtube-transcript-api and
+    """Fetch the transcript for a YouTube video via ytscribe.ai API and
     return the path to the saved plain-text transcript file.
 
     The transcript is stored at {data.directory}/youtube/{id}.txt.
     If the file already exists it is returned immediately without re-fetching.
 
-    Tries English first, then French.
     Returns the path to the transcript file, or None if no transcript could be
     obtained.
     """
@@ -137,19 +135,22 @@ def get_youtube_transcript(item, config):
     if os.path.exists(transcript_path):
         return transcript_path
 
-    video_id = get_youtube_video_id(item["link"])
-    if not video_id:
-        return None
-
     try:
-        ytt_api = YouTubeTranscriptApi()
-        transcript = ytt_api.fetch(video_id, languages=["en", "fr"])
-        formatter = TextFormatter()
-        transcript_text = formatter.format_transcript(transcript)
+        response = requests.post(
+            "https://ytscribe.ai/api/transcripts",
+            headers={
+                "Authorization": f"Bearer {config['ytscribe']['api_key']}",
+                "Content-Type": "application/json",
+            },
+            json={"url": item["link"]},
+        )
+        response.raise_for_status()
+        data = response.json()
+        transcript_text = data.get("transcript", "")
     except Exception:
         return None
 
-    if not transcript_text.strip():
+    if not transcript_text or not transcript_text.strip():
         return None
 
     with open(transcript_path, "w", encoding="utf-8") as f:
