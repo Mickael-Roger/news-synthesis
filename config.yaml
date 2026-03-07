@@ -8,6 +8,8 @@ llm:
 
 smtp:
   server: "smtp.gmail.com"
+  port: 587
+  ssl: true
   username: "YOUR_SMTP_USERNAME"
   password: "YOUR_SMTP_PASSWORD"
   sender_email: "your_email@example.com"
