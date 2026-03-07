@@ -1,9 +1,6 @@
 import argparse
 import os
-import re
 import smtplib
-import subprocess
-import tempfile
 import yaml
 import sqlite3
 from datetime import datetime, timedelta
@@ -13,6 +10,8 @@ from email.mime.multipart import MIMEMultipart
 import assemblyai as aai
 import litellm
 import markdown
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api.formatters import TextFormatter
 
 
 def load_config(config_path):
@@ -106,58 +105,29 @@ def process_regular_news(item, config):
     print(f"Synthesized: [{item['feed_name']}] {item['title']}")
 
 
-def parse_vtt(vtt_path):
-    """Extract raw conversation text from a VTT subtitle file.
+def get_youtube_video_id(url):
+    """Extract the YouTube video ID from a URL."""
+    import urllib.parse
 
-    Auto-generated VTT files contain duplicate/rolling lines and inline
-    word-level timecodes like <00:00:01.000><c>word</c>.  This function
-    keeps only the clean plain-text lines (no inline tags), removes
-    duplicates that arise from the rolling-caption pattern, and joins
-    everything into a single readable transcript string.
-    """
-    with open(vtt_path, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    lines = content.splitlines()
-    clean_lines = []
-    for line in lines:
-        # Skip header lines, blank lines, and timestamp lines
-        if not line.strip():
-            continue
-        if (
-            line.startswith("WEBVTT")
-            or line.startswith("Kind:")
-            or line.startswith("Language:")
-        ):
-            continue
-        if re.match(r"^\d{2}:\d{2}:\d{2}\.\d{3} -->", line):
-            continue
-        # Skip lines containing inline word-level timecodes (<HH:MM:SS.mmm><c>…</c>)
-        if re.search(r"<\d{2}:\d{2}:\d{2}\.\d{3}>", line):
-            continue
-        # Strip any remaining HTML-like tags (e.g. <c>, </c>)
-        text = re.sub(r"<[^>]+>", "", line).strip()
-        if text:
-            clean_lines.append(text)
-
-    # Remove consecutive duplicates produced by the rolling-caption pattern
-    deduped = []
-    for line in clean_lines:
-        if not deduped or line != deduped[-1]:
-            deduped.append(line)
-
-    return " ".join(deduped)
+    parsed = urllib.parse.urlparse(url)
+    if parsed.hostname in ("youtu.be",):
+        return parsed.path.lstrip("/")
+    if parsed.hostname in ("www.youtube.com", "youtube.com", "m.youtube.com"):
+        params = urllib.parse.parse_qs(parsed.query)
+        return params.get("v", [None])[0]
+    return None
 
 
 def get_youtube_transcript(item, config):
-    """Download auto-generated subtitles for a YouTube video and return the
-    path to the saved plain-text transcript file.
+    """Fetch the transcript for a YouTube video via youtube-transcript-api and
+    return the path to the saved plain-text transcript file.
 
     The transcript is stored at {data.directory}/youtube/{id}.txt.
-    If the file already exists it is returned immediately without re-downloading.
+    If the file already exists it is returned immediately without re-fetching.
 
-    Returns the path to the transcript file, or None if subtitles could not
-    be obtained.
+    Tries English first, then French.
+    Returns the path to the transcript file, or None if no transcript could be
+    obtained.
     """
     youtube_dir = os.path.join(config["data"]["directory"], "youtube")
     os.makedirs(youtube_dir, exist_ok=True)
@@ -167,45 +137,25 @@ def get_youtube_transcript(item, config):
     if os.path.exists(transcript_path):
         return transcript_path
 
-    video_url = item["link"]
+    video_id = get_youtube_video_id(item["link"])
+    if not video_id:
+        return None
 
-    # Try English first, then French
-    for lang in ("en", "fr"):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cmd = [
-                "yt-dlp",
-                "--write-auto-sub",
-                "--skip-download",
-                "--sub-lang",
-                lang,
-                "--output",
-                os.path.join(tmpdir, "%(id)s"),
-                video_url,
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        ytt_api = YouTubeTranscriptApi()
+        transcript = ytt_api.fetch(video_id, languages=["en", "fr"])
+        formatter = TextFormatter()
+        transcript_text = formatter.format_transcript(transcript)
+    except Exception:
+        return None
 
-            # Find the downloaded VTT file
-            vtt_files = [
-                os.path.join(tmpdir, f)
-                for f in os.listdir(tmpdir)
-                if f.endswith(".vtt")
-            ]
+    if not transcript_text.strip():
+        return None
 
-            if not vtt_files:
-                continue  # Try next language
+    with open(transcript_path, "w", encoding="utf-8") as f:
+        f.write(transcript_text)
 
-            vtt_path = vtt_files[0]
-            transcript_text = parse_vtt(vtt_path)
-
-            if not transcript_text.strip():
-                continue  # Empty transcript, try next language
-
-            with open(transcript_path, "w", encoding="utf-8") as f:
-                f.write(transcript_text)
-
-            return transcript_path
-
-    return None
+    return transcript_path
 
 
 def process_youtube_news(item, config):
