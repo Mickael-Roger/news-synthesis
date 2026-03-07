@@ -1,0 +1,27 @@
+assemblyai:
+  api_key: "YOUR_ASSEMBLYAI_API_KEY"
+
+llm:
+  endpoint: "https://api.openai.com/v1"
+  model_name: "gpt-4"
+  api_key: "YOUR_LLM_API_KEY"
+
+smtp:
+  server: "smtp.gmail.com"
+  username: "YOUR_SMTP_USERNAME"
+  password: "YOUR_SMTP_PASSWORD"
+  sender_email: "your_email@example.com"
+  destination_email: "destination@example.com"
+
+data:
+  directory: "./data"
+  sqlite_path: "./db.sqlite"
+
+feed_categories:
+  youtube_category:
+    - "Youtube"
+  podcast_category:
+    - "Podcasts"
+
+ignored_feeds: []
+  # - "Feed Name To Ignore"
