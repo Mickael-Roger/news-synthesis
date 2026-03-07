@@ -81,9 +81,8 @@ def update_db_content(item_id, synthesis_markdown, config):
             (html_content, item_id),
         )
         conn.commit()
-        print(f"  DB content updated for entry {item_id}")
     except Exception as e:
-        print(f"  Warning: failed to update DB content for entry {item_id}: {e}")
+        pass
     finally:
         conn.close()
 
@@ -96,17 +95,15 @@ def process_regular_news(item, config):
     file_path = os.path.join(news_dir, f"{item['id']}.md")
 
     if os.path.exists(file_path):
-        print(f"  Skipping (already synthesized): {item['title']}")
         return
 
-    print(f"  Synthesizing: {item['title']}")
     synthesis = synthesize_news(item, config)
 
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(synthesis)
 
-    print(f"  Written: {file_path}")
     update_db_content(item["id"], synthesis, config)
+    print(f"Synthesized: [{item['feed_name']}] {item['title']}")
 
 
 def parse_vtt(vtt_path):
@@ -168,11 +165,9 @@ def get_youtube_transcript(item, config):
     transcript_path = os.path.join(youtube_dir, f"{item['id']}.txt")
 
     if os.path.exists(transcript_path):
-        print(f"  Transcript already exists: {transcript_path}")
         return transcript_path
 
     video_url = item["link"]
-    print(f"  Downloading subtitles for: {item['title']}")
 
     # Try English first, then French
     for lang in ("en", "fr"):
@@ -208,10 +203,8 @@ def get_youtube_transcript(item, config):
             with open(transcript_path, "w", encoding="utf-8") as f:
                 f.write(transcript_text)
 
-            print(f"  Transcript written: {transcript_path}")
             return transcript_path
 
-    print(f"  Warning: no subtitles found for {video_url}")
     return None
 
 
@@ -223,12 +216,10 @@ def process_youtube_news(item, config):
 
     synthesis_path = os.path.join(news_dir, f"{item['id']}.md")
     if os.path.exists(synthesis_path):
-        print(f"  Skipping (already synthesized): {item['title']}")
         return
 
     transcript_path = get_youtube_transcript(item, config)
     if transcript_path is None:
-        print(f"  Skipping synthesis (no transcript available): {item['title']}")
         return
 
     with open(transcript_path, "r", encoding="utf-8") as f:
@@ -238,14 +229,13 @@ def process_youtube_news(item, config):
     item_with_transcript = dict(item)
     item_with_transcript["content"] = transcript_text
 
-    print(f"  Synthesizing: {item['title']}")
     synthesis = synthesize_news(item_with_transcript, config)
 
     with open(synthesis_path, "w", encoding="utf-8") as f:
         f.write(synthesis)
 
-    print(f"  Written: {synthesis_path}")
     update_db_content(item["id"], synthesis, config)
+    print(f"Synthesized: [{item['feed_name']}] {item['title']}")
 
 
 def get_podcast_transcript(item, config):
@@ -263,11 +253,9 @@ def get_podcast_transcript(item, config):
     transcript_path = os.path.join(podcasts_dir, f"{item['id']}.txt")
 
     if os.path.exists(transcript_path):
-        print(f"  Transcript already exists: {transcript_path}")
         return transcript_path
 
     audio_url = item["link"]
-    print(f"  Transcribing with AssemblyAI: {item['title']}")
     aai.settings.api_key = config["assemblyai"]["api_key"]
     transcription_config = aai.TranscriptionConfig(
         speech_models=["universal-3-pro", "universal-2"],
@@ -277,18 +265,15 @@ def get_podcast_transcript(item, config):
     transcript = transcriber.transcribe(audio_url)
 
     if transcript.status == aai.TranscriptStatus.error:
-        print(f"  Warning: transcription failed: {transcript.error}")
         return None
 
     transcript_text = transcript.text or ""
     if not transcript_text.strip():
-        print(f"  Warning: empty transcript for {audio_url}")
         return None
 
     with open(transcript_path, "w", encoding="utf-8") as f:
         f.write(transcript_text)
 
-    print(f"  Transcript written: {transcript_path}")
     return transcript_path
 
 
@@ -303,12 +288,10 @@ def process_podcast_news(item, config):
 
     synthesis_path = os.path.join(news_dir, f"{item['id']}.md")
     if os.path.exists(synthesis_path):
-        print(f"  Skipping (already synthesized): {item['title']}")
         return
 
     transcript_path = get_podcast_transcript(item, config)
     if transcript_path is None:
-        print(f"  Skipping synthesis (no transcript available): {item['title']}")
         return
 
     with open(transcript_path, "r", encoding="utf-8") as f:
@@ -318,14 +301,13 @@ def process_podcast_news(item, config):
     item_with_transcript = dict(item)
     item_with_transcript["content"] = transcript_text
 
-    print(f"  Synthesizing: {item['title']}")
     synthesis = synthesize_news(item_with_transcript, config)
 
     with open(synthesis_path, "w", encoding="utf-8") as f:
         f.write(synthesis)
 
-    print(f"  Written: {synthesis_path}")
     update_db_content(item["id"], synthesis, config)
+    print(f"Synthesized: [{item['feed_name']}] {item['title']}")
 
 
 def collect_period_syntheses(news_items, config):
@@ -585,20 +567,10 @@ def main():
     for item in news_items:
         category = item["category_name"] or "Uncategorized"
         news_type = classify_news(category, config)
-        date = datetime.fromtimestamp(item["date"]).strftime("%Y-%m-%d %H:%M:%S")
 
         ignored_feeds = config.get("ignored_feeds") or []
         if item["feed_name"] in ignored_feeds:
-            print(f"Skipping ignored feed: {item['feed_name']} — {item['title']}")
             continue
-
-        print(f"Type: {news_type}")
-        print(f"Title: {item['title']}")
-        print(f"Date: {date}")
-        print(f"Category: {category}")
-        print(f"Feed: {item['feed_name']}")
-        print(f"Link: {item['link']}")
-        print()
 
         if news_type == "regular":
             process_regular_news(item, config)
