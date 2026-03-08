@@ -153,6 +153,8 @@ def get_youtube_transcript(item, config):
     if not transcript_text or not transcript_text.strip():
         return None
 
+    transcript_text = transcript_text.replace("\n", " ")
+
     with open(transcript_path, "w", encoding="utf-8") as f:
         f.write(transcript_text)
 
