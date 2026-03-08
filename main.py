@@ -239,7 +239,13 @@ def get_youtube_transcript(item, config):
 
 def process_youtube_news(item, config):
     """Download the transcript for a YouTube video, synthesize it via LLM,
-    and write the synthesis to {data.directory}/news/{id}.md."""
+    and write the synthesis to {data.directory}/news/{id}.md.
+
+    The transcript ({data.directory}/youtube/{id}.txt) is fetched only once and
+    reused on subsequent runs.  The synthesis ({data.directory}/news/{id}.md) is
+    independent: even when the transcript already exists, synthesis is still
+    performed if the .md file is missing.
+    """
     logger = logging.getLogger("news-synthesis")
     news_dir = os.path.join(config["data"]["directory"], "news")
     os.makedirs(news_dir, exist_ok=True)
@@ -249,6 +255,7 @@ def process_youtube_news(item, config):
         logger.debug(f"Skipping synthesis (already exists): {item['id']}")
         return
 
+    # Fetch the transcript (no-op if the .txt file already exists on disk)
     transcript_path = get_youtube_transcript(item, config)
     if transcript_path is None:
         logger.warning(
@@ -256,9 +263,20 @@ def process_youtube_news(item, config):
         )
         return
 
+    logger.info(
+        f"Synthesizing YouTube item (transcript {'cached' if os.path.exists(transcript_path) else 'fetched'}): "
+        f"[{item['feed_name']}] {item['title']}"
+    )
+
     try:
         with open(transcript_path, "r", encoding="utf-8") as f:
             transcript_text = f.read()
+
+        if not transcript_text.strip():
+            logger.warning(
+                f"Transcript file is empty for YouTube item {item['id']}, skipping synthesis"
+            )
+            return
 
         # Synthesize using the transcript as content
         item_with_transcript = dict(item)
