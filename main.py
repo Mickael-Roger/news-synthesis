@@ -170,7 +170,7 @@ def get_youtube_video_id(url):
 
 
 def get_youtube_transcript(item, config):
-    """Fetch the transcript for a YouTube video via ytscribe.ai API and
+    """Fetch the transcript for a YouTube video via fetchtranscript API and
     return the path to the saved plain-text transcript file.
 
     The transcript is stored at {data.directory}/youtube/{id}.txt.
@@ -189,29 +189,31 @@ def get_youtube_transcript(item, config):
         logger.debug(f"Using existing transcript: {transcript_path}")
         return transcript_path
 
+    video_id = get_youtube_video_id(item["link"])
+    if not video_id:
+        logger.error(f"Could not extract YouTube video ID from URL: {item['link']}")
+        return None
+
     logger.info(f"Fetching YouTube transcript for: {item['id']} - {item['title']}")
 
     try:
-        response = requests.post(
-            "https://ytscribe.ai/api/transcripts",
-            headers={
-                "Authorization": f"Bearer {config['ytscribe']['api_key']}",
-                "Content-Type": "application/json",
-            },
-            json={"url": item["link"]},
+        response = requests.get(
+            f"https://api.fetchtranscript.com/v1/transcripts/{video_id}",
+            params={"format": "text"},
+            headers={"Authorization": f"Bearer {config['fetchtranscript']['api_key']}"},
             timeout=60,
         )
         response.raise_for_status()
         data = response.json()
-        transcript_text = data.get("transcript", "")
+        transcript_text = data.get("text", "")
     except requests.exceptions.Timeout:
         logger.error(
-            f"Timeout fetching YouTube transcript for item {item['id']}: URL {item['link']}"
+            f"Timeout fetching YouTube transcript for item {item['id']}: video_id {video_id}"
         )
         return None
     except requests.exceptions.RequestException as e:
         logger.error(
-            f"Failed to fetch YouTube transcript for item {item['id']}: URL {item['link']} - {e}"
+            f"Failed to fetch YouTube transcript for item {item['id']}: video_id {video_id} - {e}"
         )
         return None
     except Exception as e:

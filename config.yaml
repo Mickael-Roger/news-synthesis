@@ -15,8 +15,8 @@ smtp:
   sender_email: "your_email@example.com"
   destination_email: "destination@example.com"
 
-ytscribe:
-  api_key: "YOUR_YTSCRIBE_API_KEY"
+fetchtranscript:
+  api_key: "YOUR_FETCHTRANSCRIPT_API_KEY"
 
 data:
   directory: "./data"
