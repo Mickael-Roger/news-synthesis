@@ -304,6 +304,76 @@ def process_youtube_news(item, config):
         raise
 
 
+def _transcribe_via_local_download(audio_url, item_id, transcriber, config):
+    """Download *audio_url* locally and submit the local file to AssemblyAI.
+
+    Used as a fallback when AssemblyAI cannot fetch the URL itself (e.g. the
+    server rejects its download agent).  The SDK uploads the local file
+    automatically.
+
+    Returns the AssemblyAI Transcript object, or None on failure.
+    """
+    import tempfile
+    import mimetypes
+
+    logger = logging.getLogger("news-synthesis")
+
+    # Mimic a podcast client to avoid CDN blocks (e.g. CloudFront filtering
+    # requests from unknown user agents)
+    headers = {
+        "User-Agent": ("PodcastAddict/v5 (+https://podcastaddict.com/app) Android/14")
+    }
+
+    logger.info(f"Downloading audio locally for item {item_id}: {audio_url}")
+    try:
+        response = requests.get(audio_url, headers=headers, timeout=120, stream=True)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to download audio for item {item_id}: {e}")
+        return None
+
+    # Verify the content looks like audio
+    content_type = response.headers.get("Content-Type", "")
+    if content_type and not (
+        content_type.startswith("audio/")
+        or content_type.startswith("video/")
+        or "octet-stream" in content_type
+    ):
+        logger.error(
+            f"Unexpected content type '{content_type}' when downloading audio for item {item_id}"
+        )
+        return None
+
+    # Determine a sensible file extension
+    ext = mimetypes.guess_extension(content_type.split(";")[0].strip()) or ".mp3"
+    # mimetypes sometimes returns .mp2 for audio/mpeg — normalise to .mp3
+    if ext in (".mp2", ".mpga"):
+        ext = ".mp3"
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            tmp_path = tmp.name
+            for chunk in response.iter_content(chunk_size=8192):
+                tmp.write(chunk)
+
+        logger.info(
+            f"Audio downloaded to temporary file: {tmp_path} for item {item_id}"
+        )
+        transcript = transcriber.transcribe(tmp_path)
+        return transcript
+    except Exception as e:
+        logger.error(f"Error during local-file transcription for item {item_id}: {e}")
+        return None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+                logger.debug(f"Temporary audio file removed: {tmp_path}")
+            except OSError as e:
+                logger.warning(f"Could not remove temporary file {tmp_path}: {e}")
+
+
 def get_podcast_transcript(item, config):
     """Transcribe a podcast episode via AssemblyAI and return the path to the
     saved plain-text transcript file.
@@ -362,10 +432,28 @@ def get_podcast_transcript(item, config):
         return None
 
     if transcript.status == aai.TranscriptStatus.error:
-        logger.error(
-            f"AssemblyAI transcription error for item {item['id']}: {transcript.error}"
-        )
-        return None
+        error_msg = transcript.error or ""
+        if "Download error" in error_msg or "unable to download" in error_msg.lower():
+            logger.warning(
+                f"AssemblyAI could not download the audio URL for item {item['id']}, "
+                f"attempting local download fallback: {audio_url}"
+            )
+            transcript = _transcribe_via_local_download(
+                audio_url, item["id"], transcriber, config
+            )
+            if transcript is None:
+                return None
+            if transcript.status == aai.TranscriptStatus.error:
+                logger.error(
+                    f"AssemblyAI transcription error (local fallback) for item {item['id']}: "
+                    f"{transcript.error}"
+                )
+                return None
+        else:
+            logger.error(
+                f"AssemblyAI transcription error for item {item['id']}: {transcript.error}"
+            )
+            return None
 
     transcript_text = transcript.text or ""
     if not transcript_text.strip():
