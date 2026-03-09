@@ -79,7 +79,11 @@ def synthesize_news(item, config):
         f"Title: {item['title']}\n"
         f"URL: {item['link']}\n\n"
         f"Content:\n{item['content'] or ''}\n\n"
-        "Your task: Provide a comprehensive synthesis of this news article that captures most if not all essential information. "
+        "Your task: Produce a two-part synthesis of this news article.\n"
+        "\n"
+        "PART 1 — Short summary (4 to 5 lines): Write a brief, self-contained summary that gives the reader an immediate understanding of the article.\n"
+        "\n"
+        "PART 2 — Comprehensive synthesis: Provide a detailed synthesis that captures most if not all essential information. "
         "Include the following elements:\n"
         "1. Main points and key facts\n"
         "2. Context and background information\n"
@@ -89,9 +93,13 @@ def synthesize_news(item, config):
         "6. Relevant dates, locations, and entities mentioned\n"
         "7. Any technical details or specifics that add depth\n"
         "\n"
-        "Structure your synthesis clearly with paragraphs or bullet points as appropriate. "
-        "Focus on completeness and depth rather than brevity. "
-        "Regardless of the original language, your synthesis must always be written in English."
+        "IMPORTANT: If the content provided above is empty, unavailable, or insufficient to produce a meaningful synthesis, "
+        "you must explicitly state that the content could not be accessed and provide no synthesis. "
+        "Do NOT invent, fabricate, or hallucinate any information. Only synthesize what is explicitly present in the content above.\n"
+        "\n"
+        "Format your response with '## Summary' as the heading for Part 1 and '## Detailed Synthesis' as the heading for Part 2. "
+        "Within Part 2, use paragraphs or bullet points as appropriate. "
+        "Regardless of the original language, your entire response must always be written in English."
     )
 
     try:
@@ -315,7 +323,28 @@ def get_podcast_transcript(item, config):
         logger.debug(f"Using existing transcript: {transcript_path}")
         return transcript_path
 
-    audio_url = item["link"]
+    # Extract the MP3 URL from the enclosure in the attributes field
+    audio_url = None
+    attributes_raw = item["attributes"] if "attributes" in item.keys() else None
+    if attributes_raw:
+        import json
+
+        try:
+            attributes = json.loads(attributes_raw)
+            enclosures = attributes.get("enclosures", [])
+            if enclosures:
+                audio_url = enclosures[0].get("url")
+        except (json.JSONDecodeError, AttributeError) as e:
+            logger.warning(
+                f"Failed to parse attributes for podcast item {item['id']}: {e}"
+            )
+
+    if not audio_url:
+        logger.warning(
+            f"No enclosure URL found in attributes for podcast item {item['id']}, falling back to link"
+        )
+        audio_url = item["link"]
+
     logger.info(f"Transcribing podcast: {item['id']} - {item['title']}")
 
     try:
@@ -630,6 +659,7 @@ def get_latest_news(config, frequency):
                 e.author,
                 e.content,
                 e.date,
+                e.attributes,
                 f.name as feed_name,
                 f.url as feed_url,
                 f.kind as feed_kind,
