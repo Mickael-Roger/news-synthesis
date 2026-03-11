@@ -4,6 +4,7 @@ assemblyai:
 llm:
   endpoint: "https://api.openai.com/v1"
   model_name: "gpt-4"
+  small_model_name: "gpt-4o-mini"
   api_key: "YOUR_LLM_API_KEY"
 
 smtp:

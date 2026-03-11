@@ -45,7 +45,7 @@ All failures are logged with appropriate levels:
 
 ## Configuration Structure (config.yaml)
 - `assemblyai.api_key`: API key for podcast transcription
-- `llm`: LLM configuration (endpoint, model_name, api_key)
+- `llm`: LLM configuration (endpoint, model_name, small_model_name, api_key)
 - `smtp`: Email configuration (server, port, ssl, username, password, sender_email, destination_email)
 - `fetchtranscript.api_key`: API key for YouTube transcript fetching via fetchtranscript.com
 - `data`: Data paths (directory, sqlite_path)
@@ -64,7 +64,7 @@ All failures are logged with appropriate levels:
 - **Regular news**: Fetched from DB → LLM synthesis → written to `{data.directory}/news/{id}.md` → synthesis converted to HTML and stored in `entry.content` in SQLite
 - **YouTube news**: Fetched from DB → `fetchtranscript.com` API transcript fetch (GET `/v1/transcripts/{video_id}?format=text`) → raw transcript written to `{data.directory}/youtube/{id}.txt` → LLM synthesis → written to `{data.directory}/news/{id}.md` → synthesis converted to HTML and stored in `entry.content` in SQLite
 - **Podcast news**: Fetched from DB → AssemblyAI transcription (direct URL) → raw transcript written to `{data.directory}/podcasts/{id}.txt` → LLM synthesis → written to `{data.directory}/news/{id}.md` → synthesis converted to HTML and stored in `entry.content` in SQLite
-- **Global synthesis**: Check if synthesis file exists at `{data.directory}/synthesis/YYYY-MM-DD.md` (daily) or `{data.directory}/synthesis/YYYY-Week_XX.md` (weekly) → if exists, read existing file; if not exists, merge all `{data.directory}/news/{id}.md` files for the period and send to LLM → structured Markdown digest grouped by category/theme → written to file → (unless `--no-send` flag is set) markdown content converted to HTML → sent via email to configured recipient
+- **Global synthesis**: Check if synthesis file exists at `{data.directory}/synthesis/YYYY-MM-DD.md` (daily) or `{data.directory}/synthesis/YYYY-Week_XX.md` (weekly) → if exists, read existing file; if not exists, merge all `{data.directory}/news/{id}.md` files for the period and send to LLM → structured Markdown digest grouped by category/theme → written to file → (unless `--no-send` flag is set) markdown content converted to bilingual HTML (English + French) via small LLM model → sent via email to configured recipient
 
 ## Key Functions
 - `synthesize_news(item, config)`: Calls LiteLLM with category, feed, title, URL and content; instructs the LLM to produce a **two-part synthesis**: a short summary (4–5 lines, `## Summary`) followed by a comprehensive detailed synthesis (`## Detailed Synthesis`) covering main points, context, data/statistics, quotes, implications, dates/locations/entities, technical details; always responds in English regardless of the source language; explicitly instructs the LLM **not to fabricate content** — if the content is empty or unavailable the LLM must state it cannot be accessed and produce no synthesis; returns synthesis text
@@ -79,7 +79,9 @@ All failures are logged with appropriate levels:
 - `collect_period_syntheses(news_items, config)`: Reads all existing `{data.directory}/news/{id}.md` files for the period's news items (skipping ignored feeds and missing files); returns a list of dicts with synthesis text and metadata
 - `make_global_synthesis(syntheses, frequency, config)`: Sends all collected syntheses to the LLM with instructions to classify each item as either **TYPE A — Current News** (recent events, announcements, launches) or **TYPE B — Tech Articles** (evergreen deep dives, tutorials, opinion pieces). Produces a structured Markdown digest with two top-level sections: `## Current News` (TYPE A items grouped by theme, comprehensive synthesis with all key facts) and `## Tech Articles & Deep Dives` (TYPE B items listed as brief bullet-point reminders with Markdown links). Returns the synthesis string or `None`.
 - `write_global_synthesis(synthesis_text, frequency, config)`: Creates `{data.directory}/synthesis/` dir if needed; writes the global synthesis to `YYYY-MM-DD.md` (daily) or `YYYY-Week_XX.md` (weekly, using ISO year and week number); skips if file already exists; returns the file path
-- `send_email(subject, content, config)`: Sends an email using SMTP configuration from config.yaml; converts markdown content to HTML (with tables support) and sends both plain text and HTML versions; uses SMTP_SSL if ssl=true, otherwise uses SMTP with STARTTLS; returns True on success, False on failure
+- `convert_markdown_to_html_via_llm(markdown_content, subject, config)`: Uses the small LLM model (`llm.small_model_name`) to convert the markdown synthesis into a beautiful, modern HTML email containing both an English version and a full French translation, displayed sequentially with a visual separator. Strips any markdown code fences from the LLM output. Returns the HTML string or `None` on failure.
+- `_fallback_markdown_to_html(content, subject)`: Fallback HTML conversion using the `markdown` library (no LLM). Used when `convert_markdown_to_html_via_llm` fails. Produces a basic HTML document with inline CSS.
+- `send_email(subject, content, config)`: Sends an email using SMTP configuration from config.yaml; converts markdown content to bilingual HTML via the small LLM model (with fallback to basic `markdown` library conversion); sends both plain text and HTML versions; uses SMTP_SSL if ssl=true, otherwise uses SMTP with STARTTLS; returns True on success, False on failure
 - LiteLLM is called with `openai/{model_name}` prefix to route to the configured OpenAI-compatible endpoint
 
 ## Important

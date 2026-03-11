@@ -675,9 +675,114 @@ def write_global_synthesis(synthesis_text, frequency, config):
     return file_path
 
 
+def convert_markdown_to_html_via_llm(markdown_content, subject, config):
+    """Convert markdown synthesis to beautiful bilingual HTML using the small LLM model.
+
+    The LLM produces a polished HTML email with the content in both English and
+    French (translated by the LLM). Both versions are displayed sequentially,
+    separated by a visual divider, for maximum email-client compatibility.
+
+    Args:
+        markdown_content: The markdown synthesis text (in English).
+        subject: The email subject line, used as the HTML title/header.
+        config: The full config dict (needs config["llm"]).
+
+    Returns:
+        A complete HTML document string, or None on failure.
+    """
+    logger = logging.getLogger("news-synthesis")
+    llm_config = config["llm"]
+    model = f"openai/{llm_config['small_model_name']}"
+
+    prompt = (
+        "You are an expert HTML email designer. Convert the following Markdown newsletter "
+        "into a beautiful, modern, responsive HTML email.\n\n"
+        "REQUIREMENTS:\n"
+        "1. Produce a COMPLETE standalone HTML document (<!DOCTYPE html> through </html>).\n"
+        "2. Use ALL inline CSS styles (no external stylesheets). Use a clean, professional "
+        "newsletter design with good typography, spacing, and visual hierarchy.\n"
+        "3. Design guidelines:\n"
+        "   - Use a max-width container (680px) centered on the page with a light background.\n"
+        "   - Use a colored header/banner area with the email subject as the title.\n"
+        "   - Use clear section headings with subtle borders or background colors.\n"
+        "   - Use readable fonts (system font stack: -apple-system, BlinkMacSystemFont, "
+        "'Segoe UI', Roboto, Helvetica, Arial, sans-serif).\n"
+        "   - Use appropriate colors: dark text (#1a1a2e), accent color (#0f3460) for headings, "
+        "subtle backgrounds (#f5f5f5, #e8edf2) for sections.\n"
+        "   - Style links nicely (colored, underlined on hover).\n"
+        "   - Use bullet points, blockquotes, or cards for article items.\n"
+        "   - Ensure tables are well-styled if present.\n"
+        "4. The email must contain TWO language sections displayed one after the other:\n"
+        "   a. FIRST: The original English content, with a small heading/label "
+        "indicating 'English Version' or similar.\n"
+        "   b. THEN: A clear visual separator/divider.\n"
+        "   c. THEN: The FULL French translation of the same content, with a small heading/label "
+        "indicating 'Version Francaise' or similar.\n"
+        "5. The French translation must be accurate and natural-sounding. Translate EVERYTHING "
+        "including section headings, but keep proper nouns, product names, and technical terms "
+        "in their original form.\n"
+        "6. Output ONLY the HTML code. No explanations, no markdown fences, no commentary.\n\n"
+        f"EMAIL SUBJECT: {subject}\n\n"
+        f"MARKDOWN CONTENT TO CONVERT AND TRANSLATE:\n\n{markdown_content}"
+    )
+
+    logger.info("Converting markdown to bilingual HTML via LLM (small model)")
+    try:
+        response = litellm.completion(
+            model=model,
+            api_key=llm_config["api_key"],
+            api_base=llm_config["endpoint"],
+            messages=[{"role": "user", "content": prompt}],
+        )
+        html_output = response.choices[0].message.content
+
+        # Strip markdown code fences if the LLM wrapped the output
+        if html_output.startswith("```"):
+            lines = html_output.split("\n")
+            # Remove first line (```html or ```) and last line (```)
+            if lines[-1].strip() == "```":
+                lines = lines[1:-1]
+            else:
+                lines = lines[1:]
+            html_output = "\n".join(lines)
+
+        logger.info("HTML conversion via LLM completed successfully")
+        return html_output
+    except Exception as e:
+        logger.error(f"Failed to convert markdown to HTML via LLM: {e}")
+        return None
+
+
+def _fallback_markdown_to_html(content, subject):
+    """Fallback HTML conversion using the markdown library (no LLM).
+
+    Used when the LLM-based conversion fails.
+    """
+    html_content = markdown.markdown(content, extensions=["tables"])
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+        h1, h2 {{ color: #2c3e50; }}
+        table {{ border-collapse: collapse; width: 100%; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+        th {{ background-color: #f2f2f2; }}
+    </style>
+</head>
+<body>
+{html_content}
+</body>
+</html>
+"""
+
+
 def send_email(subject, content, config):
     """Send an email with the given subject and content.
 
+    Uses the small LLM model to convert markdown to beautiful bilingual HTML.
+    Falls back to basic markdown-to-HTML conversion if LLM fails.
     Uses SMTP configuration from config.yaml.
     Returns True if sent successfully, False otherwise.
     """
@@ -696,24 +801,13 @@ def send_email(subject, content, config):
     text_part = MIMEText(content, "plain", "utf-8")
     message.attach(text_part)
 
-    html_content = markdown.markdown(content, extensions=["tables"])
-    html_body = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <style>
-        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-        h1, h2 {{ color: #2c3e50; }}
-        table {{ border-collapse: collapse; width: 100%; }}
-        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-        th {{ background-color: #f2f2f2; }}
-    </style>
-</head>
-<body>
-{html_content}
-</body>
-</html>
-"""
+    html_body = convert_markdown_to_html_via_llm(content, subject, config)
+    if html_body is None:
+        logger.warning(
+            "LLM HTML conversion failed, falling back to basic markdown conversion"
+        )
+        html_body = _fallback_markdown_to_html(content, subject)
+
     html_part = MIMEText(html_body, "html", "utf-8")
     message.attach(html_part)
 
