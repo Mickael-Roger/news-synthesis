@@ -54,7 +54,22 @@ def get_time_offset(frequency):
         raise ValueError(f"Unknown frequency: {frequency}")
 
 
-def classify_news(category_name, config):
+def is_youtube_url(url):
+    """Return True if the URL points to a YouTube video (not a Short)."""
+    if not url:
+        return False
+    import urllib.parse
+
+    parsed = urllib.parse.urlparse(url)
+    return parsed.hostname in (
+        "www.youtube.com",
+        "youtube.com",
+        "m.youtube.com",
+        "youtu.be",
+    )
+
+
+def classify_news(category_name, config, link=None):
     youtube_categories = config["feed_categories"]["youtube_category"]
     podcast_categories = config["feed_categories"]["podcast_category"]
 
@@ -62,6 +77,10 @@ def classify_news(category_name, config):
         return "youtube"
     elif category_name in podcast_categories:
         return "podcast"
+    elif is_youtube_url(link):
+        # Item is not in a YouTube category but its link is a YouTube URL —
+        # treat it as a YouTube video (Shorts will be skipped inside process_youtube_news).
+        return "youtube"
     else:
         return "regular"
 
@@ -1107,12 +1126,14 @@ def main():
     youtube_count = sum(
         1
         for item in news_items
-        if classify_news(item["category_name"] or "Uncategorized", config) == "youtube"
+        if classify_news(item["category_name"] or "Uncategorized", config, item["link"])
+        == "youtube"
     )
     podcast_count = sum(
         1
         for item in news_items
-        if classify_news(item["category_name"] or "Uncategorized", config) == "podcast"
+        if classify_news(item["category_name"] or "Uncategorized", config, item["link"])
+        == "podcast"
     )
     regular_count = len(news_items) - youtube_count - podcast_count
 
@@ -1123,7 +1144,7 @@ def main():
 
     for item in news_items:
         category = item["category_name"] or "Uncategorized"
-        news_type = classify_news(category, config)
+        news_type = classify_news(category, config, item["link"])
 
         ignored_feeds = config.get("ignored_feeds") or []
         if item["feed_name"] in ignored_feeds:
