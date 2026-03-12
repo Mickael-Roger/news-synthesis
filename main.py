@@ -420,8 +420,16 @@ def process_youtube_news(item, config):
     reused on subsequent runs.  The synthesis ({data.directory}/news/{id}.md) is
     independent: even when the transcript already exists, synthesis is still
     performed if the .md file is missing.
+
+    YouTube Shorts (URLs containing /shorts/) are silently skipped.
     """
     logger = logging.getLogger("news-synthesis")
+
+    # Skip YouTube Shorts entirely — no transcript, no synthesis
+    if "/shorts/" in (item["link"] or ""):
+        logger.debug(f"Skipping YouTube Short: {item['id']} - {item['title']}")
+        return
+
     news_dir = os.path.join(config["data"]["directory"], "news")
     os.makedirs(news_dir, exist_ok=True)
 
