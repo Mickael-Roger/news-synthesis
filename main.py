@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 import os
 import smtplib
@@ -65,8 +66,75 @@ def classify_news(category_name, config):
         return "regular"
 
 
+def fetch_article_content(url):
+    """Fetch the article content from a URL and return its text.
+
+    Used as a fallback when the LLM cannot access the article content
+    (e.g., some news providers block LLM platform IP ranges).
+
+    Args:
+        url: The article URL to fetch.
+
+    Returns:
+        The raw HTML content of the page, or an error message if fetching fails.
+    """
+    logger = logging.getLogger("news-synthesis")
+    try:
+        response = requests.get(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) "
+                    "Gecko/20100101 Firefox/128.0"
+                ),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        logger.info(f"Fetched article content from URL: {url}")
+        return response.text
+    except requests.exceptions.Timeout:
+        logger.warning(f"Timeout fetching article content from: {url}")
+        return "Error: Request timed out while fetching the article."
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Failed to fetch article content from {url}: {e}")
+        return f"Error: Failed to fetch the article - {e}"
+
+
+# Tool definition for LLM function calling
+FETCH_ARTICLE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "fetch_article_content",
+        "description": (
+            "Fetch the full article content from the given URL. "
+            "Use this tool when the content provided in the prompt is empty, "
+            "insufficient, or cannot be used to produce a meaningful synthesis."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL of the article to fetch.",
+                }
+            },
+            "required": ["url"],
+        },
+    },
+}
+
+
 def synthesize_news(item, config):
-    """Send news details to the LLM and return a synthesis."""
+    """Send news details to the LLM and return a synthesis.
+
+    The LLM is provided with a ``fetch_article_content`` tool it can invoke
+    when the RSS content is empty, truncated, or otherwise insufficient.
+    If the LLM calls the tool, the article is fetched via ``requests`` and
+    the result is sent back so the LLM can complete the synthesis.
+    """
     logger = logging.getLogger("news-synthesis")
     llm_config = config["llm"]
     model = f"openai/{llm_config['model_name']}"
@@ -95,12 +163,93 @@ def synthesize_news(item, config):
         "- Technical details\n"
         "\n"
         "IMPORTANT: If the content provided above is empty, unavailable, or insufficient to produce a meaningful synthesis, "
-        "you must explicitly state that the content could not be accessed and provide no synthesis. "
-        "Do NOT invent, fabricate, or hallucinate any information. Only synthesize what is explicitly present in the content above.\n"
+        "use the fetch_article_content tool to retrieve the full article from the URL. "
+        "Do NOT invent, fabricate, or hallucinate any information. Only synthesize what is explicitly present in the content.\n"
         "\n"
         "Format your response with '## Summary' as the heading for Part 1 and '## Detailed Synthesis' as the heading for Part 2. "
         "Use bullet points throughout. Avoid full paragraphs of prose. "
         "Regardless of the original language, your entire response must always be written in English."
+    )
+
+    try:
+        messages = [{"role": "user", "content": prompt}]
+
+        response = litellm.completion(
+            model=model,
+            api_key=llm_config["api_key"],
+            api_base=llm_config["endpoint"],
+            messages=messages,
+            tools=[FETCH_ARTICLE_TOOL],
+            tool_choice="auto",
+        )
+
+        response_message = response.choices[0].message
+
+        # Check if the LLM wants to call the fetch tool
+        if response_message.tool_calls:
+            tool_call = response_message.tool_calls[0]
+            if tool_call.function.name == "fetch_article_content":
+                args = json.loads(tool_call.function.arguments)
+                url = args.get("url", item["link"])
+                logger.info(f"LLM requested article fetch for item {item['id']}: {url}")
+                fetched_content = fetch_article_content(url)
+
+                # Send the tool result back to the LLM
+                messages.append(response_message.model_dump())
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": fetched_content,
+                    }
+                )
+
+                response = litellm.completion(
+                    model=model,
+                    api_key=llm_config["api_key"],
+                    api_base=llm_config["endpoint"],
+                    messages=messages,
+                    tools=[FETCH_ARTICLE_TOOL],
+                )
+                logger.debug(
+                    f"LLM synthesis completed (after fetch) for item: {item['id']}"
+                )
+                return response.choices[0].message.content
+
+        logger.debug(f"LLM synthesis completed for item: {item['id']}")
+        return response_message.content
+    except Exception as e:
+        logger.error(f"Failed to synthesize news item {item['id']}: {e}")
+        raise
+
+
+def convert_news_synthesis_to_html(synthesis_markdown, config):
+    """Convert a per-item news synthesis from Markdown to styled HTML using the small LLM.
+
+    Falls back to basic ``markdown`` library conversion if the LLM call fails.
+
+    Args:
+        synthesis_markdown: The Markdown synthesis text to convert.
+        config: The full config dict (needs config["llm"]).
+
+    Returns:
+        An HTML string (always succeeds — worst case is basic conversion).
+    """
+    logger = logging.getLogger("news-synthesis")
+    llm_config = config["llm"]
+    model = f"openai/{llm_config['small_model_name']}"
+
+    prompt = (
+        "Convert the following Markdown news synthesis into clean, well-formatted HTML "
+        "suitable for display in an RSS reader.\n\n"
+        "REQUIREMENTS:\n"
+        "1. Produce only the HTML body content — no <!DOCTYPE>, <html>, <head>, or <body> tags.\n"
+        "2. Use inline CSS styles where helpful for readability (e.g. for headings, bullet lists).\n"
+        "3. Keep the content in English exactly as provided — do NOT translate.\n"
+        '4. Preserve all Markdown links as proper <a href="..."> HTML links.\n'
+        "5. Style headings (## Summary, ## Detailed Synthesis) clearly.\n"
+        "6. Output ONLY the HTML fragment. No explanations, no markdown fences, no commentary.\n\n"
+        f"MARKDOWN CONTENT:\n\n{synthesis_markdown}"
     )
 
     try:
@@ -110,21 +259,35 @@ def synthesize_news(item, config):
             api_base=llm_config["endpoint"],
             messages=[{"role": "user", "content": prompt}],
         )
-        logger.debug(f"LLM synthesis completed for item: {item['id']}")
-        return response.choices[0].message.content
+        html_output = response.choices[0].message.content
+
+        # Strip markdown code fences if the LLM wrapped the output
+        if html_output.startswith("```"):
+            lines = html_output.split("\n")
+            if lines[-1].strip() == "```":
+                lines = lines[1:-1]
+            else:
+                lines = lines[1:]
+            html_output = "\n".join(lines)
+
+        logger.debug("News synthesis HTML conversion via LLM completed")
+        return html_output
     except Exception as e:
-        logger.error(f"Failed to synthesize news item {item['id']}: {e}")
-        raise
+        logger.warning(
+            f"LLM HTML conversion failed for news synthesis, falling back to markdown library: {e}"
+        )
+        return markdown.markdown(synthesis_markdown, extensions=["tables"])
 
 
 def update_db_content(item_id, synthesis_markdown, config):
-    """Convert *synthesis_markdown* to HTML and store it in entry.content.
+    """Convert *synthesis_markdown* to HTML via the small LLM and store it in entry.content.
 
     The on-disk .md file is left untouched; only the SQLite database row is
     updated so that readers of the DB (e.g. FreshRSS) see the rendered HTML.
+    Falls back to basic markdown-to-HTML conversion if the LLM call fails.
     """
     logger = logging.getLogger("news-synthesis")
-    html_content = markdown.markdown(synthesis_markdown, extensions=["tables"])
+    html_content = convert_news_synthesis_to_html(synthesis_markdown, config)
     sqlite_path = config["data"]["sqlite_path"]
     conn = sqlite3.connect(sqlite_path)
     try:
@@ -398,8 +561,6 @@ def get_podcast_transcript(item, config):
     audio_url = None
     attributes_raw = item["attributes"] if "attributes" in item.keys() else None
     if attributes_raw:
-        import json
-
         try:
             attributes = json.loads(attributes_raw)
             enclosures = attributes.get("enclosures", [])
