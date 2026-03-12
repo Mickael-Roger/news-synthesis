@@ -206,12 +206,17 @@ def synthesize_news(item, config):
                 response = client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    tools=[FETCH_ARTICLE_TOOL],
+                    tool_choice="none",
                 )
                 logger.debug(
                     f"LLM synthesis completed (after fetch) for item: {item['id']}"
                 )
-                return response.choices[0].message.content
+                synthesis_text = response.choices[0].message.content
+                if not synthesis_text:
+                    logger.warning(
+                        f"LLM returned empty content after article fetch for item: {item['id']}"
+                    )
+                return synthesis_text
 
         logger.debug(f"LLM synthesis completed for item: {item['id']}")
         return response_message.content
