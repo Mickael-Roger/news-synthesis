@@ -245,10 +245,19 @@ def convert_news_synthesis_to_html(synthesis_markdown, config):
         "REQUIREMENTS:\n"
         "1. Produce only the HTML body content — no <!DOCTYPE>, <html>, <head>, or <body> tags.\n"
         "2. Use inline CSS styles where helpful for readability (e.g. for headings, bullet lists).\n"
-        "3. Keep the content in English exactly as provided — do NOT translate.\n"
-        '4. Preserve all Markdown links as proper <a href="..."> HTML links.\n'
+        "3. The output MUST contain TWO versions of the content: the original English version AND "
+        "a full French translation. Translate the entire synthesis content into French accurately.\n"
+        '4. Preserve all Markdown links as proper <a href="..."> HTML links in both versions.\n'
         "5. Style headings (## Summary, ## Detailed Synthesis) clearly.\n"
-        "6. Output ONLY the HTML fragment. No explanations, no markdown fences, no commentary.\n\n"
+        "6. Add a language toggle button at the top of the fragment that switches between the "
+        "English and French versions. Use only inline JavaScript (no external scripts). "
+        "The English version must be shown by default. "
+        "The button label should update to reflect the language it will switch TO "
+        "(e.g. show 'Français' when English is active, show 'English' when French is active). "
+        "Wrap the English content in a <div id='lang-en'> and the French content in "
+        "<div id='lang-fr' style='display:none'>. "
+        "The toggle button should flip the display of those two divs.\n"
+        "7. Output ONLY the HTML fragment. No explanations, no markdown fences, no commentary.\n\n"
         f"MARKDOWN CONTENT:\n\n{synthesis_markdown}"
     )
 
