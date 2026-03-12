@@ -11,7 +11,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 import assemblyai as aai
-import litellm
+from openai import OpenAI
 import markdown
 import requests
 
@@ -137,7 +137,8 @@ def synthesize_news(item, config):
     """
     logger = logging.getLogger("news-synthesis")
     llm_config = config["llm"]
-    model = f"openai/{llm_config['model_name']}"
+    model = llm_config["model_name"]
+    client = OpenAI(api_key=llm_config["api_key"], base_url=llm_config["endpoint"])
 
     logger.debug(f"Synthesizing news item: {item['id']} - {item['title']}")
 
@@ -174,10 +175,8 @@ def synthesize_news(item, config):
     try:
         messages = [{"role": "user", "content": prompt}]
 
-        response = litellm.completion(
+        response = client.chat.completions.create(
             model=model,
-            api_key=llm_config["api_key"],
-            api_base=llm_config["endpoint"],
             messages=messages,
             tools=[FETCH_ARTICLE_TOOL],
             tool_choice="auto",
@@ -204,10 +203,8 @@ def synthesize_news(item, config):
                     }
                 )
 
-                response = litellm.completion(
+                response = client.chat.completions.create(
                     model=model,
-                    api_key=llm_config["api_key"],
-                    api_base=llm_config["endpoint"],
                     messages=messages,
                     tools=[FETCH_ARTICLE_TOOL],
                 )
@@ -237,7 +234,8 @@ def convert_news_synthesis_to_html(synthesis_markdown, config):
     """
     logger = logging.getLogger("news-synthesis")
     llm_config = config["llm"]
-    model = f"openai/{llm_config['small_model_name']}"
+    model = llm_config["small_model_name"]
+    client = OpenAI(api_key=llm_config["api_key"], base_url=llm_config["endpoint"])
 
     prompt = (
         "Convert the following Markdown news synthesis into clean, well-formatted HTML "
@@ -262,10 +260,8 @@ def convert_news_synthesis_to_html(synthesis_markdown, config):
     )
 
     try:
-        response = litellm.completion(
+        response = client.chat.completions.create(
             model=model,
-            api_key=llm_config["api_key"],
-            api_base=llm_config["endpoint"],
             messages=[{"role": "user", "content": prompt}],
         )
         html_output = response.choices[0].message.content
@@ -746,7 +742,8 @@ def make_global_synthesis(syntheses, frequency, config):
         return None
 
     llm_config = config["llm"]
-    model = f"openai/{llm_config['model_name']}"
+    model = llm_config["model_name"]
+    client = OpenAI(api_key=llm_config["api_key"], base_url=llm_config["endpoint"])
 
     period_label = "daily" if frequency == "daily" else "weekly"
 
@@ -807,10 +804,8 @@ def make_global_synthesis(syntheses, frequency, config):
     )
 
     try:
-        response = litellm.completion(
+        response = client.chat.completions.create(
             model=model,
-            api_key=llm_config["api_key"],
-            api_base=llm_config["endpoint"],
             messages=[{"role": "user", "content": prompt}],
         )
         logger.debug(f"Global synthesis completed")
@@ -875,7 +870,8 @@ def convert_markdown_to_html_via_llm(markdown_content, subject, config):
     """
     logger = logging.getLogger("news-synthesis")
     llm_config = config["llm"]
-    model = f"openai/{llm_config['small_model_name']}"
+    model = llm_config["small_model_name"]
+    client = OpenAI(api_key=llm_config["api_key"], base_url=llm_config["endpoint"])
 
     prompt = (
         "You are an expert HTML email designer. Convert the following Markdown newsletter "
@@ -911,10 +907,8 @@ def convert_markdown_to_html_via_llm(markdown_content, subject, config):
 
     logger.info("Converting markdown to bilingual HTML via LLM (small model)")
     try:
-        response = litellm.completion(
+        response = client.chat.completions.create(
             model=model,
-            api_key=llm_config["api_key"],
-            api_base=llm_config["endpoint"],
             messages=[{"role": "user", "content": prompt}],
         )
         html_output = response.choices[0].message.content

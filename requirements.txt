@@ -1,5 +1,5 @@
 PyYAML>=6.0
 assemblyai>=0.20.0
-litellm>=1.40.0
+openai>=1.0.0
 markdown>=3.6
 requests>=2.31.0

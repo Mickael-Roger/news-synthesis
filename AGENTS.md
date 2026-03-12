@@ -8,7 +8,7 @@
 ## Dependencies
 - PyYAML - Configuration file handling
 - assemblyai - Podcast transcription
-- litellm - LLM usage
+- openai - OpenAI-compatible API client for LLM calls
 - markdown - Markdown to HTML conversion
 - requests - HTTP requests for YouTube transcripts via fetchtranscript.com
 - smtplib - Email sending (built-in)
@@ -69,7 +69,7 @@ All failures are logged with appropriate levels:
 ## Key Functions
 - `fetch_article_content(url)`: Fetches the full article HTML from a URL using `requests` with a browser-like User-Agent. Used as a fallback when the LLM cannot access the RSS content (e.g., some news providers block LLM platform IP ranges). Returns the raw HTML content or an error message string on failure. Timeout: 30 s.
 - `FETCH_ARTICLE_TOOL`: Tool definition (OpenAI function-calling format) for `fetch_article_content`, passed to the LLM in `synthesize_news` so the LLM can request article fetching when content is empty or insufficient.
-- `synthesize_news(item, config)`: Calls LiteLLM with category, feed, title, URL and content; provides the `FETCH_ARTICLE_TOOL` so the LLM can request article fetching when RSS content is empty/truncated/insufficient. If the LLM invokes the tool, the article is fetched via `fetch_article_content`, the result is sent back as a tool response, and the LLM completes the synthesis. Instructs the LLM to produce a **two-part synthesis** using bullet points throughout (no prose paragraphs): a TL;DR (`## Summary`, 2–3 bullets covering what/who/why) followed by a detailed breakdown (`## Detailed Synthesis`) as bullet points covering key facts, context, data/statistics, quotes, implications, dates/locations/entities, technical details; always responds in English regardless of the source language; explicitly instructs the LLM **not to fabricate content**; returns synthesis text
+- `synthesize_news(item, config)`: Calls the OpenAI client with category, feed, title, URL and content; provides the `FETCH_ARTICLE_TOOL` so the LLM can request article fetching when RSS content is empty/truncated/insufficient. If the LLM invokes the tool, the article is fetched via `fetch_article_content`, the result is sent back as a tool response, and the LLM completes the synthesis. Instructs the LLM to produce a **two-part synthesis** using bullet points throughout (no prose paragraphs): a TL;DR (`## Summary`, 2–3 bullets covering what/who/why) followed by a detailed breakdown (`## Detailed Synthesis`) as bullet points covering key facts, context, data/statistics, quotes, implications, dates/locations/entities, technical details; always responds in English regardless of the source language; explicitly instructs the LLM **not to fabricate content**; returns synthesis text
 - `convert_news_synthesis_to_html(synthesis_markdown, config)`: Converts a per-item Markdown synthesis to a styled HTML fragment using the small LLM model (`llm.small_model_name`). Produces an HTML body fragment (no `<html>`/`<head>`/`<body>` tags) with inline CSS, preserving links. Falls back to the `markdown` library if the LLM call fails. Strips any markdown code fences from the LLM output.
 - `update_db_content(item_id, synthesis_markdown, config)`: Converts synthesis Markdown to HTML via `convert_news_synthesis_to_html` (small LLM with fallback to `markdown` library) and writes it to `entry.content` in the SQLite DB; the `.md` file on disk is left unchanged
 - `process_regular_news(item, config)`: Creates `{data.directory}/news/` dir if needed, writes synthesis to `{id}.md`, then calls `update_db_content`
@@ -85,7 +85,7 @@ All failures are logged with appropriate levels:
 - `convert_markdown_to_html_via_llm(markdown_content, subject, config)`: Uses the small LLM model (`llm.small_model_name`) to convert the global markdown digest into a beautiful, modern HTML email containing both an English version and a full French translation, displayed sequentially with a visual separator. Strips any markdown code fences from the LLM output. Returns the HTML string or `None` on failure.
 - `_fallback_markdown_to_html(content, subject)`: Fallback HTML conversion using the `markdown` library (no LLM). Used when `convert_markdown_to_html_via_llm` fails. Produces a basic HTML document with inline CSS.
 - `send_email(subject, content, config)`: Sends an email using SMTP configuration from config.yaml; converts markdown content to bilingual HTML via the small LLM model (with fallback to basic `markdown` library conversion); sends both plain text and HTML versions; uses SMTP_SSL if ssl=true, otherwise uses SMTP with STARTTLS; returns True on success, False on failure
-- LiteLLM is called with `openai/{model_name}` prefix to route to the configured OpenAI-compatible endpoint
+- The OpenAI client is instantiated with `base_url` set to `llm.endpoint` and `api_key` set to `llm.api_key` from config, allowing any OpenAI-compatible endpoint
 
 ## Important
 - **Update this AGENTS.md file after any relevant changes** (new features, bug fixes, configuration changes)
