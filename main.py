@@ -45,6 +45,30 @@ def load_config(config_path):
         return yaml.safe_load(f)
 
 
+def get_fetchtranscript_api_keys(config):
+    """Return configured FetchTranscript API keys as a non-empty list."""
+    api_keys = config.get("fetchtranscript", {}).get("api_key")
+
+    if isinstance(api_keys, str):
+        api_keys = [api_keys]
+    elif not isinstance(api_keys, list):
+        return []
+
+    return [
+        api_key.strip()
+        for api_key in api_keys
+        if isinstance(api_key, str) and api_key.strip()
+    ]
+
+
+def is_fetchtranscript_quota_error(response):
+    """Return True when the response indicates the current API key quota is exhausted."""
+    if response.status_code != 402:
+        return False
+
+    return True
+
+
 def get_time_offset(frequency):
     if frequency == "daily":
         return timedelta(hours=24).total_seconds()
@@ -391,33 +415,61 @@ def get_youtube_transcript(item, config):
         logger.error(f"Could not extract YouTube video ID from URL: {item['link']}")
         return None
 
+    api_keys = get_fetchtranscript_api_keys(config)
+    if not api_keys:
+        logger.error("No valid FetchTranscript API key configured")
+        return None
+
     logger.info(f"Fetching YouTube transcript for: {item['id']} - {item['title']}")
 
-    try:
-        response = requests.get(
-            f"https://api.fetchtranscript.com/v1/transcripts/{video_id}",
-            params={"format": "text"},
-            headers={"Authorization": f"Bearer {config['fetchtranscript']['api_key']}"},
-            timeout=60,
-        )
-        response.raise_for_status()
-        data = response.json()
-        transcript_text = data.get("text", "")
-    except requests.exceptions.Timeout:
-        logger.error(
-            f"Timeout fetching YouTube transcript for item {item['id']}: video_id {video_id}"
-        )
-        return None
-    except requests.exceptions.RequestException as e:
-        logger.error(
-            f"Failed to fetch YouTube transcript for item {item['id']}: video_id {video_id} - {e}"
-        )
-        return None
-    except Exception as e:
-        logger.error(
-            f"Unexpected error fetching YouTube transcript for item {item['id']}: {e}"
-        )
-        return None
+    transcript_text = ""
+    for index, api_key in enumerate(api_keys, start=1):
+        try:
+            response = requests.get(
+                f"https://api.fetchtranscript.com/v1/transcripts/{video_id}",
+                params={"format": "text"},
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=60,
+            )
+
+            if not response.ok:
+                if is_fetchtranscript_quota_error(response):
+                    if index < len(api_keys):
+                        logger.warning(
+                            "FetchTranscript quota exceeded for API key %s/%s on item %s; trying next key",
+                            index,
+                            len(api_keys),
+                            item["id"],
+                        )
+                        continue
+
+                    logger.warning(
+                        "All FetchTranscript API keys exhausted for item %s: video_id %s",
+                        item["id"],
+                        video_id,
+                    )
+                    return None
+
+                response.raise_for_status()
+
+            data = response.json()
+            transcript_text = data.get("text", "")
+            break
+        except requests.exceptions.Timeout:
+            logger.error(
+                f"Timeout fetching YouTube transcript for item {item['id']}: video_id {video_id}"
+            )
+            return None
+        except requests.exceptions.RequestException as e:
+            logger.error(
+                f"Failed to fetch YouTube transcript for item {item['id']}: video_id {video_id} - {e}"
+            )
+            return None
+        except Exception as e:
+            logger.error(
+                f"Unexpected error fetching YouTube transcript for item {item['id']}: {e}"
+            )
+            return None
 
     if not transcript_text or not transcript_text.strip():
         logger.warning(f"Empty transcript received for YouTube item {item['id']}")

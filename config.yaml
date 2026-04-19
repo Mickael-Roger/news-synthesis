@@ -17,7 +17,11 @@ smtp:
   destination_email: "destination@example.com"
 
 fetchtranscript:
-  api_key: "YOUR_FETCHTRANSCRIPT_API_KEY"
+  # Supports either a single API key string or a list of API keys.
+  # When FetchTranscript returns HTTP 402 (insufficient quota), the next key is tried.
+  api_key:
+    - "YOUR_FETCHTRANSCRIPT_API_KEY_1"
+    - "YOUR_FETCHTRANSCRIPT_API_KEY_2"
 
 data:
   directory: "./data"
