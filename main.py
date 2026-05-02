@@ -811,9 +811,9 @@ def collect_period_syntheses(news_items, config):
 def make_global_synthesis(syntheses, frequency, config):
     """Send all per-item syntheses to the LLM and return a global synthesis.
 
-    The LLM is instructed to group the news by category or theme of its own
-    choosing and produce a structured Markdown document summarising the entire
-    period.  The response is always in English.
+    The LLM is instructed to identify the key developments of the period,
+    especially recurring stories covered by multiple sources, and produce a
+    structured Markdown digest.  The response is always in English.
 
     Returns the synthesis string, or None if there is nothing to synthesise.
     """
@@ -845,12 +845,19 @@ def make_global_synthesis(syntheses, frequency, config):
         f"Below are the individual news syntheses collected for the {period_label} digest.\n"
         f"Each synthesis is separated by '---'.\n\n"
         f"{items_block}"
-        f"Your task: produce a structured Markdown digest with exactly three sections, in this order.\n\n"
+        f"Your task: produce a structured Markdown digest with exactly three sections, in this order. "
+        f"This digest must not be an inventory of every item. It must surface the key developments "
+        f"of the period: the stories a reader should not miss, especially those confirmed, repeated, "
+        f"or enriched by multiple independent sources.\n\n"
         f"---\n\n"
         f"SECTION 1 — '## Highlights'\n"
-        f"Pick the 2 to 3 most important or impactful news items from the entire set. "
+        f"Pick up to 3 to 5 important cross-source takeaways from the entire set. "
+        f"Use fewer if the period does not support that many meaningful highlights. "
+        f"Prioritize stories mentioned by multiple feeds or sources. "
+        f"Include a single-source story only if it is unusually important or high-impact. "
         f"Write one bullet point per highlight. Each bullet must be self-contained: state what happened, "
-        f"who is involved, and why it matters — all in one or two short sentences. No fluff.\n\n"
+        f"who is involved, why it matters, and if relevant which sources converge on it — "
+        f"all in one or two short sentences. No fluff.\n\n"
         f"---\n\n"
         f"SECTION 2 — '## News'\n"
         f"First, classify every item as either:\n"
@@ -863,14 +870,18 @@ def make_global_synthesis(syntheses, frequency, config):
         f"(e.g. AI, Cloud, Cybersecurity, Science, Business, Geopolitics, Space, Health, …). "
         f"Use as many or as few topics as needed — do not force items into ill-fitting categories.\n\n"
         f"Rules for this section:\n"
-        f"- If multiple items cover the same story from different sources, merge them into a single entry.\n"
-        f"- Each entry gets 2 to 3 bullet points maximum. Be ruthlessly concise.\n"
+        f"- Do not list every TYPE A item. Select and synthesize the key developments of the period.\n"
+        f"- If multiple items cover the same story from different sources, merge them into a single entry and mention the source convergence.\n"
+        f"- Favor stories supported by multiple sources; include single-source items only when they add important signal.\n"
+        f"- Each entry gets 2 to 4 bullet points maximum. Be ruthlessly concise.\n"
         f"- Each bullet must carry a distinct, concrete piece of information (fact, figure, quote, consequence).\n"
         f"- Include the item title as a Markdown link on the first bullet of each entry.\n"
+        f"- Use additional Markdown links inside bullets only when they represent different sources for the same story.\n"
         f"- No prose paragraphs. Bullet points only.\n\n"
         f"---\n\n"
         f"SECTION 3 — '## Tech Articles & Deep Dives'\n"
-        f"List all TYPE B items here. For each item write a single bullet point containing:\n"
+        f"List selected high-signal TYPE B items here. Omit routine or low-value items. "
+        f"For each selected item write a single bullet point containing:\n"
         f"  - The article title as a Markdown link\n"
         f"  - The feed name in bold (e.g. **Feed Name**)\n"
         f"  - One sentence describing what it covers\n"
@@ -878,7 +889,8 @@ def make_global_synthesis(syntheses, frequency, config):
         f"---\n\n"
         f"Global rules:\n"
         f"- Use bullet points everywhere. No prose paragraphs.\n"
-        f"- No TYPE A item may be omitted from Section 2.\n"
+        f"- It is acceptable and expected to omit low-signal TYPE A items from Section 2.\n"
+        f"- Do not make the digest read like a feed-by-feed list; synthesize repeated themes and source convergence.\n"
         f"- If you are uncertain whether an item is TYPE A or TYPE B, classify it as TYPE A.\n"
         f"- Your entire response must be in English regardless of the source language.\n"
     )
